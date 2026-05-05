@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+  <!-- Palm -->
+  <rect x="8" y="18" width="22" height="16" rx="4" ry="4" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Index finger -->
+  <rect x="10" y="7" width="5" height="13" rx="2.5" ry="2.5" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Middle finger -->
+  <rect x="16.5" y="5" width="5" height="15" rx="2.5" ry="2.5" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Ring finger -->
+  <rect x="23" y="7" width="5" height="13" rx="2.5" ry="2.5" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Pinky -->
+  <rect x="29" y="10" width="4" height="10" rx="2" ry="2" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Thumb -->
+  <rect x="4" y="19" width="6" height="10" rx="3" ry="3" fill="white" stroke="#222" stroke-width="2.2"/>
+  <!-- Shadow -->
+  <ellipse cx="19" cy="36" rx="10" ry="2.5" fill="rgba(0,0,0,0.13)"/>
+</svg>
