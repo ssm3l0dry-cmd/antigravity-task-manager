@@ -158,15 +158,7 @@ export function TaskCard({ task, onDelete, onToggleDone, onMoveToInProgress, onU
               {pri.label}
             </span>
 
-            <AnimatePresence>
-              {hovered && !isDragging && (
-                <motion.div
-                  className="task-card__actions"
-                  initial={{ opacity: 0, scale: 0.7 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.7 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 22 }}
-                >
+            <div className={`task-card__actions${hovered && !isDragging ? ' task-card__actions--visible' : ''}`}>
                   {task.columnId !== 'inProgress' && onMoveToInProgress && (
                     <div
                       onPointerDown={(e) => e.stopPropagation()}
@@ -199,9 +191,7 @@ export function TaskCard({ task, onDelete, onToggleDone, onMoveToInProgress, onU
                   >
                     <Trash2 size={13} />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            </div>
           </div>
 
           <p
@@ -300,7 +290,7 @@ export function TaskCard({ task, onDelete, onToggleDone, onMoveToInProgress, onU
                   className="task-card__subtask-add-btn"
                   onClick={(e) => { e.stopPropagation(); setAddingSubtask(true); }}
                   initial={{ opacity: 0 }}
-                  animate={{ opacity: hovered ? 1 : 0 }}
+                  animate={{ opacity: hovered ? 1 : undefined }}
                   exit={{ opacity: 0 }}
                   transition={{ duration: 0.15 }}
                   aria-label="Add subtask"

@@ -316,6 +316,27 @@ button:focus-visible, a:focus-visible {
   gap: 2px;
   margin-left: auto;
   pointer-events: all;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.task-card__actions--visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .task-card__actions {
+    opacity: 1;
+    gap: 6px;
+  }
+  .task-card__action-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+  .task-card__subtask-add-btn {
+    opacity: 1 !important;
+  }
 }
 
 .task-card__action-btn {
