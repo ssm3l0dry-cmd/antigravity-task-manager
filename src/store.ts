@@ -1,48 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import type { Task, ColumnId, TagDef } from './types';
+import type { Task, ColumnId, TagDef, Subtask } from './types';
+import { supabase } from './lib/supabase';
 
-const STORAGE_KEY = 'antigravity-tasks';
 const TAGS_KEY = 'antigravity-tags';
 const LAST_CLEARED_KEY = 'antigravity-last-cleared';
 
-function todayDateString(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
-function purgeDoneTasksIfNewDay(): void {
-  const today = todayDateString();
-  const last = localStorage.getItem(LAST_CLEARED_KEY);
-  if (last === today) return;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const tasks = JSON.parse(raw) as Task[];
-      const kept = tasks.filter((t) => t.columnId !== 'done');
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
-    }
-  } catch { /* ignore */ }
-  localStorage.setItem(LAST_CLEARED_KEY, today);
-}
-
-purgeDoneTasksIfNewDay();
-
 export const TAG_PALETTE = [
-  '#ffdad9', // rose
-  '#fde68a', // amber
-  '#bbf7d0', // mint
-  '#bfdbfe', // sky
-  '#e9d5ff', // lavender
-  '#fed7aa', // peach
-  '#d1fae5', // sage
-  '#fce7f3', // pink
-  '#cffafe', // cyan
-  '#f3f4f6', // neutral
+  '#ffdad9', '#fde68a', '#bbf7d0', '#bfdbfe', '#e9d5ff',
+  '#fed7aa', '#d1fae5', '#fce7f3', '#cffafe', '#f3f4f6',
 ];
 
 export function tagTextColor(bg: string): string {
-  // simple luminance check to pick dark or dark-tinted text
   const hex = bg.replace('#', '');
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
@@ -65,7 +33,6 @@ export function loadTags(): TagDef[] {
     const raw = localStorage.getItem(TAGS_KEY);
     if (!raw) return DEFAULT_TAGS;
     const parsed = JSON.parse(raw);
-    // migrate old string[] format
     if (Array.isArray(parsed) && parsed.length > 0 && typeof parsed[0] === 'string') {
       const migrated: TagDef[] = (parsed as string[]).map((name, i) => ({
         name,
@@ -82,81 +49,194 @@ export function loadTags(): TagDef[] {
 
 export function saveTags(tags: TagDef[]) {
   localStorage.setItem(TAGS_KEY, JSON.stringify(tags));
+  void supabase.auth.getUser().then(({ data: { user } }) => {
+    if (!user) return;
+    void supabase.from('tags').delete().eq('user_id', user.id).then(() => {
+      if (tags.length === 0) return;
+      void supabase.from('tags').insert(
+        tags.map(t => ({ user_id: user.id, name: t.name, color: t.color }))
+      );
+    });
+  });
 }
 
-function loadTasks(): Task[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Task[]) : [];
-  } catch {
-    return [];
+export async function syncTagsFromDB(): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { data } = await supabase
+    .from('tags')
+    .select('name, color')
+    .eq('user_id', user.id);
+  if (data && data.length > 0) {
+    localStorage.setItem(TAGS_KEY, JSON.stringify(data as TagDef[]));
+  } else {
+    const localTags = loadTags();
+    void supabase.from('tags').insert(
+      localTags.map(t => ({ user_id: user.id, name: t.name, color: t.color }))
+    );
   }
 }
 
-function saveTasks(tasks: Task[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+function todayDateString(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function dbRowToTask(row: Record<string, unknown>): Task {
+  return {
+    id: row.id as string,
+    title: row.title as string,
+    description: (row.description as string | null) ?? undefined,
+    columnId: row.column_id as ColumnId,
+    priority: row.priority as Task['priority'],
+    createdAt: new Date(row.created_at as string).getTime(),
+    tag: (row.tag_name as string | null) ?? undefined,
+    subtasks: (row.subtasks as Subtask[]) ?? [],
+  };
 }
 
 export function useTaskStore() {
-  const [tasks, setTasks] = useState<Task[]>(loadTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    saveTasks(tasks);
-  }, [tasks]);
+    void (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
 
-  const addTask = useCallback(
-    (data: { title: string; description?: string; priority: Task['priority']; tag?: string; columnId: ColumnId; subtasks?: import('./types').Subtask[] }) => {
-      const task: Task = {
-        id: uuidv4(),
-        createdAt: Date.now(),
-        ...data,
-      };
-      setTasks((prev) => [...prev, task]);
-      return task;
-    },
-    []
-  );
+      const { data } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('position');
 
-  const moveTask = useCallback((taskId: string, targetColumn: ColumnId) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, columnId: targetColumn } : t))
-    );
+      if (data) {
+        // Migrate localStorage tasks to Supabase on first login
+        if (data.length === 0) {
+          try {
+            const raw = localStorage.getItem('antigravity-tasks');
+            if (raw) {
+              const localTasks = JSON.parse(raw) as Task[];
+              if (localTasks.length > 0) {
+                const toInsert = localTasks.map((t, i) => ({
+                  user_id: user.id,
+                  title: t.title,
+                  description: t.description ?? null,
+                  column_id: t.columnId,
+                  priority: t.priority,
+                  tag_name: t.tag ?? null,
+                  position: i,
+                  subtasks: t.subtasks ?? [],
+                }));
+                const { data: migrated } = await supabase
+                  .from('tasks')
+                  .insert(toInsert)
+                  .select();
+                if (migrated) {
+                  setTasks(migrated.map(dbRowToTask));
+                  localStorage.removeItem('antigravity-tasks');
+                  setLoading(false);
+                  return;
+                }
+              }
+            }
+          } catch { /* ignore migration errors */ }
+        }
+
+        const today = todayDateString();
+        const last = localStorage.getItem(LAST_CLEARED_KEY);
+        if (last !== today) {
+          const doneIds = data.filter(r => r.column_id === 'done').map(r => r.id as string);
+          if (doneIds.length > 0) {
+            void supabase.from('tasks').delete().in('id', doneIds);
+          }
+          setTasks(data.filter(r => r.column_id !== 'done').map(dbRowToTask));
+          localStorage.setItem(LAST_CLEARED_KEY, today);
+        } else {
+          setTasks(data.map(dbRowToTask));
+        }
+      }
+      setLoading(false);
+    })();
   }, []);
 
-  const reorderTask = useCallback(
-    (activeId: string, overId: string, targetColumn: ColumnId) => {
-      setTasks((prev) => {
-        const activeIndex = prev.findIndex((t) => t.id === activeId);
-        const overIndex = prev.findIndex((t) => t.id === overId);
-        if (activeIndex === -1) return prev;
+  const addTask = useCallback(async (
+    data: {
+      title: string;
+      description?: string;
+      priority: Task['priority'];
+      tag?: string;
+      columnId: ColumnId;
+      subtasks?: Subtask[];
+    }
+  ) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const colCount = tasks.filter(t => t.columnId === data.columnId).length;
+    const { data: inserted } = await supabase
+      .from('tasks')
+      .insert({
+        user_id: user.id,
+        title: data.title,
+        description: data.description ?? null,
+        column_id: data.columnId,
+        priority: data.priority,
+        tag_name: data.tag ?? null,
+        position: colCount,
+        subtasks: data.subtasks ?? [],
+      })
+      .select()
+      .single();
+    if (inserted) setTasks(prev => [...prev, dbRowToTask(inserted as Record<string, unknown>)]);
+  }, [tasks]);
 
-        const updated = prev.map((t) =>
-          t.id === activeId ? { ...t, columnId: targetColumn } : t
-        );
+  const moveTask = useCallback((taskId: string, targetColumn: ColumnId) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, columnId: targetColumn } : t));
+    void supabase.from('tasks').update({ column_id: targetColumn }).eq('id', taskId);
+  }, []);
 
-        const fromIdx = updated.findIndex((t) => t.id === activeId);
-        const toIdx = overIndex !== -1 ? overIndex : fromIdx;
-
-        const reordered = [...updated];
-        const [moved] = reordered.splice(fromIdx, 1);
-        reordered.splice(toIdx, 0, moved);
-        return reordered;
-      });
-    },
-    []
-  );
+  const reorderTask = useCallback((activeId: string, overId: string, targetColumn: ColumnId) => {
+    setTasks(prev => {
+      const updated = prev.map(t => t.id === activeId ? { ...t, columnId: targetColumn } : t);
+      const fromIdx = updated.findIndex(t => t.id === activeId);
+      const overIndex = updated.findIndex(t => t.id === overId);
+      const toIdx = overIndex !== -1 ? overIndex : fromIdx;
+      if (fromIdx === -1) return prev;
+      const reordered = [...updated];
+      const [moved] = reordered.splice(fromIdx, 1);
+      reordered.splice(toIdx, 0, moved);
+      void Promise.all(
+        reordered.map((task, i) =>
+          supabase.from('tasks').update({ position: i, column_id: task.columnId }).eq('id', task.id)
+        )
+      );
+      return reordered;
+    });
+  }, []);
 
   const deleteTask = useCallback((taskId: string) => {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    void supabase.from('tasks').delete().eq('id', taskId);
   }, []);
 
   const updateTask = useCallback((taskId: string, patch: Partial<Task>) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t))
-    );
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
+    const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (patch.title !== undefined) dbPatch.title = patch.title;
+    if (patch.description !== undefined) dbPatch.description = patch.description ?? null;
+    if (patch.columnId !== undefined) dbPatch.column_id = patch.columnId;
+    if (patch.priority !== undefined) dbPatch.priority = patch.priority;
+    if ('tag' in patch) dbPatch.tag_name = patch.tag ?? null;
+    if (patch.subtasks !== undefined) dbPatch.subtasks = patch.subtasks;
+    void supabase.from('tasks').update(dbPatch).eq('id', taskId);
   }, []);
 
-  const clearAll = useCallback(() => setTasks([]), []);
+  const clearAll = useCallback(async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    setTasks([]);
+    void supabase.from('tasks').delete().eq('user_id', user.id);
+  }, []);
 
-  return { tasks, addTask, moveTask, reorderTask, deleteTask, updateTask, clearAll };
+  return { tasks, loading, addTask, moveTask, reorderTask, deleteTask, updateTask, clearAll };
 }

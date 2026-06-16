@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Trash2, GitBranch, Info, Zap } from 'lucide-react';
+import { X, Trash2, GitBranch, Info, Zap, LogOut } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface Props {
   isOpen: boolean;
@@ -42,6 +43,11 @@ const itemVariants = {
 };
 
 export function Sidebar({ isOpen, onClose, onClearAll, taskCount }: Props) {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    onClose();
+  };
+
   const handleClearAll = () => {
     if (taskCount === 0) return;
     if (window.confirm('Clear all tasks? This cannot be undone.')) {
@@ -106,6 +112,17 @@ export function Sidebar({ isOpen, onClose, onClearAll, taskCount }: Props) {
             {/* Section */}
             <motion.div className="sidebar__section" variants={itemVariants}>
               <p className="sidebar__section-title">Settings</p>
+
+              <motion.button
+                className="sidebar__item sidebar__item--danger"
+                onClick={handleLogout}
+                whileHover={{ x: 4, background: 'rgba(88,0,0,0.06)' }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 22 }}
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </motion.button>
 
               <motion.button
                 className="sidebar__item sidebar__item--danger"
