@@ -3,7 +3,6 @@ import type { Task, ColumnId, TagDef, Subtask } from './types';
 import { supabase } from './lib/supabase';
 
 const TAGS_KEY = 'antigravity-tags';
-const LAST_CLEARED_KEY = 'antigravity-last-cleared';
 
 export const TAG_PALETTE = [
   '#ffdad9', '#fde68a', '#bbf7d0', '#bfdbfe', '#e9d5ff',
@@ -77,11 +76,6 @@ export async function syncTagsFromDB(): Promise<void> {
   }
 }
 
-function todayDateString(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-}
-
 function dbRowToTask(row: Record<string, unknown>): Task {
   return {
     id: row.id as string,
@@ -143,18 +137,12 @@ export function useTaskStore() {
           } catch { /* ignore migration errors */ }
         }
 
-        const today = todayDateString();
-        const last = localStorage.getItem(LAST_CLEARED_KEY);
-        if (last !== today) {
-          const doneIds = data.filter(r => r.column_id === 'done').map(r => r.id as string);
-          if (doneIds.length > 0) {
-            void supabase.from('tasks').delete().in('id', doneIds);
-          }
-          setTasks(data.filter(r => r.column_id !== 'done').map(dbRowToTask));
-          localStorage.setItem(LAST_CLEARED_KEY, today);
-        } else {
-          setTasks(data.map(dbRowToTask));
+        const doneIds = data.filter(r => r.column_id === 'done').map(r => r.id as string);
+        if (doneIds.length > 0) {
+          const { error } = await supabase.from('tasks').delete().in('id', doneIds);
+          if (error) console.error('[clearDone]', error);
         }
+        setTasks(data.filter(r => r.column_id !== 'done').map(dbRowToTask));
       }
       setLoading(false);
     })();
