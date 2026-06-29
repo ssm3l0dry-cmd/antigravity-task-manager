@@ -216,19 +216,23 @@ export function useTaskStore() {
 
   const deleteTask = useCallback((taskId: string) => {
     setTasks(prev => prev.filter(t => t.id !== taskId));
-    void supabase.from('tasks').delete().eq('id', taskId);
+    supabase.from('tasks').delete().eq('id', taskId).then(({ error }) => {
+      if (error) console.error('[deleteTask]', error);
+    });
   }, []);
 
   const updateTask = useCallback((taskId: string, patch: Partial<Task>) => {
     setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...patch } : t));
-    const dbPatch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const dbPatch: Record<string, unknown> = {};
     if (patch.title !== undefined) dbPatch.title = patch.title;
     if (patch.description !== undefined) dbPatch.description = patch.description ?? null;
     if (patch.columnId !== undefined) dbPatch.column_id = patch.columnId;
     if (patch.priority !== undefined) dbPatch.priority = patch.priority;
     if ('tag' in patch) dbPatch.tag_name = patch.tag ?? null;
     if (patch.subtasks !== undefined) dbPatch.subtasks = patch.subtasks;
-    void supabase.from('tasks').update(dbPatch).eq('id', taskId);
+    supabase.from('tasks').update(dbPatch).eq('id', taskId).then(({ error }) => {
+      if (error) console.error('[updateTask]', error);
+    });
   }, []);
 
   const clearAll = useCallback(async () => {
